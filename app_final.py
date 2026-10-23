@@ -225,3 +225,74 @@ def delete_bill(bill_id: int):
     get_bill_or_404(bill_id)
     del bills[bill_id]
     logger.info("Счёт %s удалён", bill_id)
+
+
+def to_cents(value: float) -> int:
+    return int(round(value * 100))
+
+
+def calculate_split(bill: dict, tip_percent: float) -> dict:
+    people = bill["participants"]
+    paid = {name: 0 for name in people}
+    share = {name: 0 for name in people}
+
+    for expense in bill["expenses"]:
+        amount = to_cents(expense["amount"] * (1 + tip_percent / 100))
+        sharers = expense["shared_by"] or people
+        paid[expense["payer"]] += amount
+        base, remainder = divmod(amount, len(sharers))
+        for index, name in enumerate(sharers):
+            share[name] += base + (1 if index < remainder else 0)
+
+    balance = {name: paid[name] - share[name] for name in people}
+
+   
+    debtors = sorted(([n, -b] for n, b in balance.items() if b < 0), key=lambda x: -x[1])
+    creditors = sorted(([n, b] for n, b in balance.items() if b > 0), key=lambda x: -x[1])
+    transfers = []
+    i = j = 0
+    while i < len(debtors) and j < len(creditors):
+        amount = min(debtors[i][1], creditors[j][1])
+        transfers.append({"from": debtors[i][0], "to": creditors[j][0], "amount": amount / 100})
+        debtors[i][1] -= amount
+        creditors[j][1] -= amount
+        if debtors[i][1] == 0:
+            i += 1
+        if creditors[j][1] == 0:
+            j += 1
+
+    return {
+        "bill_id": bill["id"],
+        "title": bill["title"],
+        "currency": CURRENCY,
+        "tip_percent": tip_percent,
+        "total": sum(paid.values()) / 100,
+        "people": [
+            {
+                "name": name,
+                "paid": paid[name] / 100,
+                "share": share[name] / 100,
+                "balance": balance[name] / 100,
+            }
+            for name in people
+        ],
+        "transfers": transfers,
+    }
+
+
+@app.get("/bills/{bill_id}/split")
+def split_bill(
+    bill_id: int,
+    tip: float | None = Query(
+        default=None, ge=0, le=100,
+        description="Чаевые в процентах. Если не указано — DEFAULT_TIP_PERCENT.",
+    ),
+):
+    bill = get_bill_or_404(bill_id)
+    tip_percent = DEFAULT_TIP_PERCENT if tip is None else tip
+    result = calculate_split(bill, tip_percent)
+    logger.info(
+        "Расчёт счёта %s: итого %s %s, чаевые %s%%, переводов %s",
+        bill_id, result["total"], CURRENCY, tip_percent, len(result["transfers"]),
+    )
+    return result

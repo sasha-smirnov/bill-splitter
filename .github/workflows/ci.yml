@@ -1,0 +1,56 @@
+name: Проверка FastAPI-сервиса
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Тесты
+    runs-on: ubuntu-latest
+    steps:
+      - name: Скачать репозиторий
+        uses: actions/checkout@v7
+
+      - name: Установить Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Установить зависимости
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install -r requirements-dev.txt
+
+      - name: Запустить тесты
+        run: python -m pytest -v
+
+  package:
+    name: Сборка артефакта
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Скачать репозиторий
+        uses: actions/checkout@v7
+
+      - name: Загрузить проверенное приложение
+        uses: actions/upload-artifact@v7
+        with:
+          name: bill-splitter
+          path: |
+            app_final.py
+            requirements.txt
+            run.sh
+            .env.example
+            README.md
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
